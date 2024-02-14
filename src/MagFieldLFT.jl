@@ -1,11 +1,12 @@
 module MagFieldLFT
 
-using LinearAlgebra, Permutations, OutputParser, DelimitedFiles, Printf
+using LinearAlgebra, Permutations, OutputParser, DelimitedFiles, Printf, TensorOperations
 
 export read_AILFT_params_ORCA, LFTParam, lebedev_grids
 
 const kB = 3.166811563e-6    # Boltzmann constant in Eh/K
 const alpha = 0.0072973525693  # fine structure constant
+const mu0 = 4pi*alpha^2
 
 function xyz2spher(x::Real, y::Real, z::Real)
     theta = acos(z)
@@ -164,6 +165,28 @@ calc_lz(l::Int) = diagm(l:-1:-l)
 function calc_lplusminus(l::Int, sign::Int)
     @assert Int64(abs(sign)) == 1       # sign may only be +1 or -1
     dim = 2l+1
+    mvalues = l:-1:-l
+    op = zeros(dim,dim)
+    for i_prime in 1:dim
+        m_prime = mvalues[i_prime]
+        for i in 1:dim
+            m = mvalues[i]
+            if m_prime == (m + sign)
+                op[i_prime, i] = sqrt(l*(l+1) - m*(m+sign))
+            end
+        end
+    end
+    return op
+end
+
+"""
+Calculate sz operator in basis of complex atomic orbitals.
+"""
+calc_sz(l::Float64) = diagm(l:-1:-l)
+
+function calc_splusminus(l::Float64, sign::Int)
+    @assert Int64(abs(sign)) == 1       # sign may only be +1 or -1
+    dim = Int(2l+1)
     mvalues = l:-1:-l
     op = zeros(dim,dim)
     for i_prime in 1:dim
@@ -1097,10 +1120,16 @@ term_sym = Dict(0 => "S",
                 4 => "G",
                 5 => "H",
                 6 => "I",
-                7 => "J",
-                8 => "K",
-                9 => "L",
-                10 => "M")
+                7 => "K",
+                8 => "L",
+                9 => "M",
+                10 => "N",
+                11 => "O",
+                12 => "Q",
+                13 => "R",
+                14 => "T",
+                15 => "U",
+                16 => "V")
 
 function spinQNlabel(S::Real)
     if abs(S-round(S)) < 1e-10
@@ -1142,6 +1171,248 @@ function adapt_basis_L2_S2_J2_Jz(param::LFTParam, format::String="QN")
     C_list4, labels_list4 = adapt_basis(C_list3, labels_list3, Hermitian(Jz))
     str_labels_list4 = prettylabels_L2_S2_J2_Jz(labels_list4, format)
     return C_list4, str_labels_list4
+end
+
+function Brillouin(S::Float64, T::Float64, B0::Float64)
+
+    muB = 0.5
+    ge = 2.0
+
+    k_B = 3/2*kB*T /(ge*muB*S*(S+1)*B0)
+    a = muB*ge*B0/(2*kB*T)
+    if B0 != 0
+        Br = k_B*((2*S+1)/tanh((2*S+1)*a) - 1/tanh(a))
+    else
+        Br = 1.0
+    end
+
+    return Br
+end
+
+function Brillouin_truncated(S::Float64, T::Float64, B0::Float64)
+    Br = 1 + B0^2/(240*(kB*T)^2*S*(S+1)) * (1-(2*S+1)^4)
+    return Br
+end
+
+function orientation_tensor(B0::Float64, T::Float64, chi::Array{Float64, 2})
+    #field-induced self-orientation tensor 
+    #(eq 112 from Parigi, G. et al, Progress in Nuclear Magnetic Resonance Spectroscopy 114–115 (2019) 211–236) 
+
+    w,v = eigen(chi)
+    a = (B0^2)/(5*mu0*kB*T)
+    chiiso = (1/3)*tr(Diagonal(w))
+    Pw = zeros(3,3)
+    for i in 1:3
+    	Pw[i,i]= (1 + a*(w[i]-chiiso))
+    end
+    P = v * Pw * v'
+    return P
+end
+
+function trace_ord2(tensor::Array{Float64, 4})
+    # computes the order 2 trace of a supersymmetric fourth order tensor
+
+    trace = @tensor begin
+        trace = tensor[i, i, j, j]
+    end
+
+    return trace
+end
+
+function product_ord3(tensor::Array{Float64, 4}, Dip::Array{Float64, 2})
+    #dot product between two fourth order tensors
+
+    sigma = zeros(Float64, 3, 3, 3, 3)
+
+    @tensor begin
+        sigma[l, m, n, k] := tensor[l, m, n, q] * Dip[q, k]
+    end
+
+    return sigma
+end
+
+function calc_shifts_KurlandMcGarvey_ord4(param::LFTParam, R::Vector{Vector{Float64}}, T::Real, B0::Real, direct::Bool=false, selforient::Bool=false)
+    #pcs calculation with Kurland-McGarvey equation 
+    #the saturation effect is accounted for with fourth order tensor (determined via analytical equation)
+
+    beta = 1/(kB*T)
+
+    chi = calc_susceptibility_vanVleck(param, T)
+    if direct
+        chi3 = -4pi*alpha^2*calc_F_deriv4(param, T, [0.0,0.0,0.0]) 
+    end
+  
+    shifts = Vector{Float64}(undef, 0)
+    for Ri in R
+        Dip = calc_dipole_matrix(Ri)
+        sigma = -(1/(4pi)) * chi * Dip
+        shift = -(1/3)*tr(sigma)
+
+        if direct
+            tau = -(1/(4pi)) * (1/6) * product_ord3(chi3,Dip)
+            shift += - (1/5)*trace_ord2(tau)*B0^2
+        end
+
+        if selforient
+            shift += (1/45 * beta/mu0 *tr(sigma)*tr(chi) - 1/15 * beta/mu0 * tr(sigma*chi))*B0^2
+        end
+
+        push!(shifts, shift)
+    end
+    shifts *= 1e6    # convert to ppm
+    return shifts
+end
+
+function calc_shifts_KurlandMcGarvey_Br(param::LFTParam, R::Vector{Vector{Float64}}, T::Real, B0::Float64, S::Float64, direct::Bool=false, selforient::Bool=false)
+    #pcs calculation with Kurland-McGarvey equation
+    #the saturation effect is accounted for with Brillouin equation
+
+    beta = 1/(kB*T)
+
+    #Br = Brillouin(S, T, B0)
+    Br = Brillouin_truncated(S, T, B0)
+    chi = calc_susceptibility_vanVleck(param, T)
+
+    shifts = Vector{Float64}(undef, 0)
+    for Ri in R
+        Dip = calc_dipole_matrix(Ri)
+        sigma = -(1/(4pi)) * chi * Dip
+        shift = -(1/3)*tr(sigma)
+
+        if direct
+            shift = -(1/3)*tr(sigma .* Br)
+        end
+
+        if selforient
+            shift += (1/45 * beta/mu0 *tr(sigma)*tr(chi) - 1/15 * beta/mu0 * tr(sigma*chi))*B0^2 
+        end
+
+        push!(shifts, shift)
+    end
+    shifts *= 1e6    # convert to ppm
+    return shifts
+end
+
+function calc_dyadics(s::Float64, D::Matrix{Float64}, T::Real, quadruple::Bool)
+
+    Sp = calc_splusminus(s, +1)
+    Sm = calc_splusminus(s, -1)
+    Sz = calc_sz(s)
+
+    Sx = 0.5 * (Sp + Sm)
+    Sy = -0.5im * (Sp-Sm)
+
+    Hderiv = [Sx, Sy, Sz]
+
+    S = cat(Sx, Sy, Sz; dims=3)
+    StDS = sum(D[i, j] * S[:, :, i] * S[:, :, j] for i in 1:3, j in 1:3)
+
+    solution = eigen(StDS)
+    energies = solution.values
+    states = solution.vectors
+
+    SS = -calc_F_deriv2(energies, states, Hderiv, T)
+
+    if quadruple
+
+        SSSS = -calc_F_deriv4(energies, states, Hderiv, T)
+
+        return SS, SSSS
+    else
+        return SS
+    end
+
+end
+
+
+function calc_contactshift_fielddep_Br(s::Float64, Aiso::Matrix{Float64}, g::Matrix{Float64}, D::Matrix{Float64}, T::Real, B0::Float64, direct::Bool=false, selforient::Bool=false)
+
+    gammaI = 2.6752e8*1e-6 
+    gammaI *= 2.35051756758e5
+
+    beta = 1/(kB*T)
+
+    SS = calc_dyadics(s, D, T, false)
+
+    #Br = Brillouin(s, T, B0)
+    Br = Brillouin_truncated(s, T, B0)
+    sigma = zeros(length(Aiso), 3, 3)
+
+    chi = pi*MagFieldLFT.alpha^2 * g * SS * g'
+
+    shiftcon = Float64[]
+
+    for (i, Aiso_val) in enumerate(Aiso)
+
+        for l in 1:3, k in 1:3, o in 1:3, p in 1:3
+            if k == p
+                sigma[i, l, k] += -(1/2) * g[l, o] * (Aiso_val*2pi) *(1/gammaI) * SS[o, p]
+            end
+        end
+
+        con = 0
+
+        if selforient
+            con = ((1/45 * beta/mu0 *tr(sigma[i,:,:])*tr(chi) - 1/15 * beta/mu0 * tr(sigma[i,:,:]*chi))*B0^2) * 1e6
+        end
+
+        if direct
+            sigma[i,:,:] *= Br
+        end
+
+        con += -1/3 * tr(sigma[i, :, :]) * 1e6
+        
+        push!(shiftcon, con)
+    end
+
+    return shiftcon
+end
+
+
+
+
+function calc_contactshift_fielddep(s::Float64, Aiso::Matrix{Float64}, g::Matrix{Float64}, D::Matrix{Float64}, T::Real, B0::Float64, direct::Bool=false, selforient::Bool=false)
+
+    gammaI = 2.6752e8*1e-6 
+    gammaI *= 2.35051756758e5
+
+    beta = 1/(kB*T)
+
+    SS, SSSS = calc_dyadics(s, D, T, true)
+    
+    chi = pi*MagFieldLFT.alpha^2 * g * SS * g'
+
+    sigma1 = zeros(length(Aiso), 3, 3)
+    sigma3 = zeros(length(Aiso), 3, 3, 3, 3)
+
+    shiftcon = Float64[]
+
+    for (i, Aiso_val) in enumerate(Aiso)
+
+        for l in 1:3, m in 1:3, n in 1:3, k in 1:3, o in 1:3, p in 1:3, q in 1:3, r in 1:3
+            if k == p && m == 1 && n == 1 && q == 1 && r == 1
+                sigma1[i, l, k] += -(1/2) * g[l, o] * (Aiso_val*2pi) * (1/gammaI) * SS[o, p]
+            end
+
+            if k == r
+                sigma3[i, l, m, n, k] += -(1/8) * g[l, o] * g[m, p] * g[n, q] * (Aiso_val*2pi) *(1/gammaI) * SSSS[o, p, q, r]
+            end
+        end
+
+        con = -1/3 * tr(sigma1[i, :, :]) * 1e6
+
+        if direct
+            con += - 1/30 * trace_ord2(sigma3[i, :, :, :, :]) * B0^2 * 1e6
+        end
+
+        if selforient
+            con += ((1/45 * beta/mu0 *tr(sigma1[i,:,:])*tr(chi) - 1/15 * beta/mu0 * tr(sigma1[i,:,:]*chi))*B0^2) * 1e6
+        end
+
+        push!(shiftcon, con)
+    end
+
+    return shiftcon
 end
 
 

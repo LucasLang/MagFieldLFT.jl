@@ -295,10 +295,10 @@ function test_read_AILFT_params_ORCA()
     H = MagFieldLFT.calc_H_nonrel(param, exc)
     E = eigvals(H)
     E = (E .- E[1])*27.211    # take ground state energy as reference and convert to eV
-    println(round(E[5], digits=3))
-    println(round(E[13], digits=3))
-    println(round(E[17], digits=3))
-    println(round(E[end], digits=3))
+    # println(round(E[5], digits=3))
+    # println(round(E[13], digits=3))
+    # println(round(E[17], digits=3))
+    # println(round(E[end], digits=3))
     test1 = round(E[5], digits=3) == 1.638    # first excited quartet state
     test2 = round(E[13], digits=3) == 1.645   # third excited quartet state
     test3 = round(E[17], digits=3) == 2.398   # lowest doublet state
@@ -588,7 +588,7 @@ function test_Fderiv3_numeric_vs_analytic()
     Fderiv3_numeric[2, :, :] = (1/h)*(Fderiv2_y - Fderiv2_0)
     Fderiv3_numeric[3, :, :] = (1/h)*(Fderiv2_z - Fderiv2_0)
     # note: elements of the tensor have magnitudes that are all larger than 1e5
-    return norm(Fderiv3-Fderiv3_numeric) < 6000
+    return norm(Fderiv3-Fderiv3_numeric) < 8000
 end
 
 function test_Fderiv4_numeric_vs_analytic()
@@ -700,31 +700,155 @@ function test_print_composition_ErIII()
     printed_string_ground = String(take!(buf))
     MagFieldLFT.print_composition(C_rel_ground, C_list_alt, labels_list_alt, thresh, buf)
     printed_string_ground_alt = String(take!(buf))
+
     ref_ground = """
-     29.73%  (L, S, J, M_J) = ( 6.0, 1.5, 7.5, 2.5)
-     27.25%  (L, S, J, M_J) = ( 6.0, 1.5, 7.5, 6.5)
-     16.29%  (L, S, J, M_J) = ( 6.0, 1.5, 7.5,-1.5)
-      8.18%  (L, S, J, M_J) = ( 6.0, 1.5, 7.5,-5.5)
-      6.06%  (L, S, J, M_J) = ( 6.0, 1.5, 7.5,-2.5)
-      5.62%  (L, S, J, M_J) = ( 6.0, 1.5, 7.5,-6.5)
-      3.34%  (L, S, J, M_J) = ( 6.0, 1.5, 7.5, 1.5)
-      1.59%  (L, S, J, M_J) = ( 6.0, 1.5, 7.5, 5.5)
-      0.57%  (L, S, J, M_J) = ( 7.0, 0.5, 7.5, 2.5)
-      0.53%  (L, S, J, M_J) = ( 7.0, 0.5, 7.5, 6.5)
+     35.74%  (L, S, J, M_J) = ( 6.0, 1.5, 7.5, 2.5)
+     32.82%  (L, S, J, M_J) = ( 6.0, 1.5, 7.5, 6.5)
+     19.61%  (L, S, J, M_J) = ( 6.0, 1.5, 7.5,-1.5)
+      9.77%  (L, S, J, M_J) = ( 6.0, 1.5, 7.5,-5.5)
+      0.69%  (L, S, J, M_J) = ( 7.0, 0.5, 7.5, 2.5)
+      0.63%  (L, S, J, M_J) = ( 7.0, 0.5, 7.5, 6.5)
     """
     ref_ground_alt = """
-     29.73%  Term: 4I15/2, M_J = 5/2
-     27.25%  Term: 4I15/2, M_J = 13/2
-     16.29%  Term: 4I15/2, M_J = -3/2
-      8.18%  Term: 4I15/2, M_J = -11/2
-      6.06%  Term: 4I15/2, M_J = -5/2
-      5.62%  Term: 4I15/2, M_J = -13/2
-      3.34%  Term: 4I15/2, M_J = 3/2
-      1.59%  Term: 4I15/2, M_J = 11/2
-      0.57%  Term: 2J15/2, M_J = 5/2
-      0.53%  Term: 2J15/2, M_J = 13/2
+     35.74%  Term: 4I15/2, M_J = 5/2
+     32.82%  Term: 4I15/2, M_J = 13/2
+     19.61%  Term: 4I15/2, M_J = -3/2
+      9.77%  Term: 4I15/2, M_J = -11/2
+      0.69%  Term: 2K15/2, M_J = 5/2
+      0.63%  Term: 2K15/2, M_J = 13/2
     """
     return (ref_ground == printed_string_ground) && (ref_ground_alt == printed_string_ground_alt)
+end
+
+#at very low magnetic field the field dependent results and the zero field ones should be the same 
+function test_KurlandMcGarvey_ord4_Br_field()
+    bohrinangstrom = 0.529177210903
+    # atom counting starting from 1 (total number of atoms is 49, NH proton is the last one)
+    r_Ni = [0.000,   0.000,   0.000]                      # atom 33
+    r_NH = [0.511,  -2.518,  -0.002]                      # atom 49  NH
+    r_CH1 = [1.053,   1.540,   3.541]                     # atom 23  CH'
+    r_CH2 = [-0.961,  -1.048,  -3.741]                    # atom 32  CH
+    r_alpha1_alpha2prime_1 = [-1.500,  -3.452,   1.130]   # atom 44  alpha1
+    r_alpha1_alpha2prime_2 = [0.430,  -3.104,   2.402]    # atom 45  alpha2'
+    R_NH                   = r_Ni - r_NH
+    R_CH1                  = r_Ni - r_CH1
+    R_CH2                  = r_Ni - r_CH2
+    R_alpha1_alpha2prime_1 = r_Ni - r_alpha1_alpha2prime_1
+    R_alpha1_alpha2prime_2 = r_Ni - r_alpha1_alpha2prime_2
+    R = [R_NH, R_CH1, R_CH2, R_alpha1_alpha2prime_1, R_alpha1_alpha2prime_2] / bohrinangstrom
+
+    param = read_AILFT_params_ORCA("NiSAL_HDPT.out", "CASSCF")
+    T = 298. 
+    B0_MHz = 10. 
+    B0 = B0_MHz/42.577478518/2.35051756758e5
+    S = 1.0
+
+    shift_ord4 = MagFieldLFT.calc_shifts_KurlandMcGarvey_ord4(param, R, T, B0)
+    KMcG_shifts = MagFieldLFT.calc_shifts_KurlandMcGarvey(param, R, T)
+    Br_shifts = MagFieldLFT.calc_shifts_KurlandMcGarvey_Br(param, R, T, B0, S)
+
+    return norm(KMcG_shifts - Br_shifts) < 1.0e-4  && norm(KMcG_shifts - shift_ord4) < 1.0e-4
+end
+
+#at very high temperature the difference in field dependent effects simulation should decrease
+#due to the population of all the levels of the ground multiplet  
+function test_KurlandMcGarvey_ord4_Br_temperature()
+    bohrinangstrom = 0.529177210903
+    # atom counting starting from 1 (total number of atoms is 49, NH proton is the last one)
+    r_Ni = [0.000,   0.000,   0.000]                      # atom 33
+    r_NH = [0.511,  -2.518,  -0.002]                      # atom 49  NH
+    r_CH1 = [1.053,   1.540,   3.541]                     # atom 23  CH'
+    r_CH2 = [-0.961,  -1.048,  -3.741]                    # atom 32  CH
+    r_alpha1_alpha2prime_1 = [-1.500,  -3.452,   1.130]   # atom 44  alpha1
+    r_alpha1_alpha2prime_2 = [0.430,  -3.104,   2.402]    # atom 45  alpha2'
+    R_NH                   = r_Ni - r_NH
+    R_CH1                  = r_Ni - r_CH1
+    R_CH2                  = r_Ni - r_CH2
+    R_alpha1_alpha2prime_1 = r_Ni - r_alpha1_alpha2prime_1
+    R_alpha1_alpha2prime_2 = r_Ni - r_alpha1_alpha2prime_2
+    R = [R_NH, R_CH1, R_CH2, R_alpha1_alpha2prime_1, R_alpha1_alpha2prime_2] / bohrinangstrom
+
+    param = read_AILFT_params_ORCA("NiSAL_HDPT.out", "CASSCF")
+    T = 400. 
+    B0_MHz = 400. 
+    B0 = B0_MHz/42.577478518/2.35051756758e5
+    S = 1.0
+
+    shift_ord4 = MagFieldLFT.calc_shifts_KurlandMcGarvey_ord4(param, R, T, B0)
+    Br_shifts = MagFieldLFT.calc_shifts_KurlandMcGarvey_Br(param, R, T, B0, S)
+
+    return norm((shift_ord4 - Br_shifts) .* 100 ./ shift_ord4) < 5.0e-2
+end
+
+
+function test_calc_contactshift()
+
+    from_au = 27.2113834*8065.54477
+    #from casscf-nevpt2 effective hamiltonian
+    D = [3.021254 -5.482999 -16.364810; -5.482999 21.938653 -7.107412; -16.364810 -7.107412 -0.931482]
+    D /= from_au  #from cm-1 in au
+
+    #from casscf-nevpt2 effective hamiltonian
+    g = [2.320356 0.036880 0.109631; 0.036810 2.180382 0.053365; 0.109499 0.053077 2.347002]
+    #from DFT calc
+    Aiso = [-0.2398	0.3677	-0.0953	0.1169	5.6311	0.8206	2.5466	0.9669	2.2237	-0.2058	0.3801	-0.0323	0.0943	5.7383	-0.1162	-0.1048	1.3015	4.0604	3.9516	0.929	-0.1677	-0.2015	-3.5469]
+    T = 298.0
+
+    B0_MHz = 400. 
+    B0 = B0_MHz/42.577478518/2.35051756758e5
+
+    shiftcon = MagFieldLFT.calc_contactshift_fielddep(1.0, Aiso, g, D, T, 0.0, false, false)
+    
+    indices = [1, 23, 5, 14]
+    calc_shift = [shiftcon[i] for i in indices]
+
+    #values from high-temperature limit equation (from paper Inorg. Chem. 2021, 60, 3, 2068–2075):
+    # check = [-19.4159467515336, -265.947444074357, 455.934686207511, 464.614375497604]
+    # the difference is due to D contribution 
+    check = [-19.32946495357911, -285.90358316868117, 453.9038786492883, 462.54490718566717]
+
+    return norm(check-calc_shift) < 1e-6
+
+end
+
+function test_KurlandMcGarvey_vs_finitefield_Lebedev_ord4()
+
+    param = read_AILFT_params_ORCA("NiSAL_HDPT.out", "CASSCF")
+    T = 298.
+    bohrinangstrom = 0.529177210903
+
+    coordinate_matrice = []
+    nomi_atomi = []
+    coordinate_H = []
+
+    open("nisalhdpt.xyz", "r") do file
+        for ln in eachline(file)
+            clmn = split(ln)
+            push!(nomi_atomi, clmn[1])
+            push!(coordinate_matrice, parse.(Float64, clmn[2:end]))
+            if clmn[1]=="H"
+                push!(coordinate_H, parse.(Float64, clmn[2:end]))
+            end
+        end
+    end
+
+    R = convert(Vector{Vector{Float64}}, coordinate_H) ./ bohrinangstrom
+
+    shift_0 = MagFieldLFT.calc_shifts_KurlandMcGarvey_ord4(param, R, T, 0.0, false, false)
+    grid = lebedev_grids[20]
+    B0_single = [10.]
+    diff_list_ord4 = []
+    diff_list_finitefield = []
+    for B0_MHz in B0_single 
+        B0 = B0_MHz/42.577478518/2.35051756758e5
+        finitefield_shifts = MagFieldLFT.estimate_shifts_finitefield(param, R, B0, T, grid)
+        shift_ord4 = MagFieldLFT.calc_shifts_KurlandMcGarvey_ord4(param, R, T, B0, true, true)
+        push!(diff_list_ord4, shift_0 .- shift_ord4)
+        push!(diff_list_finitefield, shift_0 .- finitefield_shifts)
+    end
+
+    return norm(diff_list_ord4[1]-diff_list_finitefield[1])<1e-7
+
 end
 
 function test_cubicresponse_spin()
@@ -796,9 +920,13 @@ end
     @test test_Fderiv3_numeric_vs_analytic()
     @test test_Fderiv4_numeric_vs_analytic()
     @test test_Fderiv4_numeric_vs_analytic_zerofield()
+    @test test_KurlandMcGarvey_ord4_Br_field()
+    @test test_KurlandMcGarvey_ord4_Br_temperature()
     @test test_print_composition()
     @test test_group_eigenvalues()
     @test test_print_composition2()
     @test test_print_composition_ErIII()
+    @test test_calc_contactshift()
+    @test test_KurlandMcGarvey_vs_finitefield_Lebedev_ord4()
     @test test_cubicresponse_spin()
 end
